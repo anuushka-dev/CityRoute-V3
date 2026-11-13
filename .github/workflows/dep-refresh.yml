@@ -1,0 +1,77 @@
+name: Refresh frontend lockfile
+
+# One-off maintenance workflow: npm's resolver needs more memory than a small sandbox
+# has, so the lockfile is regenerated on a runner instead of by hand. Dispatch it,
+# check the resolved versions in the log, then delete this file.
+
+on:
+  workflow_dispatch:
+    inputs:
+      vite_version:
+        description: "vite version to pin"
+        required: true
+        default: "8.3.7"
+      source_map_js_version:
+        description: "source-map-js version to force via overrides"
+        required: true
+        default: "1.2.2"
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    name: Regenerate package-lock.json
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Pin the fixed versions
+        working-directory: frontend
+        run: |
+          npm pkg set "devDependencies.vite=${{ inputs.vite_version }}"
+          npm pkg set "overrides.source-map-js=${{ inputs.source_map_js_version }}"
+
+      - name: Resolve and write the lockfile
+        working-directory: frontend
+        run: npm install --package-lock-only --no-audit --no-fund
+
+      - name: Report the resolved versions
+        working-directory: frontend
+        run: |
+          node -e "
+          const lock = require('./package-lock.json');
+          const pkg = require('./package.json');
+          const get = (name) => (lock.packages['node_modules/' + name] || {}).version;
+          console.log('package.json vite:', pkg.devDependencies.vite);
+          console.log('lockfile      vite:', get('vite'));
+          console.log('lockfile source-map-js:', get('source-map-js'));
+          console.log('lockfile launch-editor:', get('launch-editor') || 'not present');
+          "
+
+      - name: Verify the lockfile installs
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund --ignore-scripts
+
+      - name: Build the bundle
+        working-directory: frontend
+        run: npm run build
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/package.json frontend/package-lock.json
+          if git diff --cached --quiet; then
+            echo "nothing to commit"
+          else
+            git commit -m "fix(deps): refresh the frontend lockfile for the vite and source-map-js advisories"
+            git push
+          fi
