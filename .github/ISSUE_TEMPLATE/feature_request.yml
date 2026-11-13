@@ -1,0 +1,60 @@
+name: Feature request
+description: Suggest an endpoint, algorithm or interface improvement
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests are easiest to evaluate when they say what problem is being solved, not only what code should be written.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The workflow that is awkward or impossible today.
+      placeholder: |
+        For a route with 300 stops, /vrp/compare/advanced takes ... and I cannot ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+      description: The endpoint, parameter or behaviour you have in mind, with an example request if useful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Workarounds you tried, or other algorithms and libraries you looked at.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Routing (route, route/compare)
+        - Distance matrix
+        - Vehicle routing (vrp)
+        - Dispatch
+        - Graph loading and snapping
+        - API, health or metrics
+        - Frontend UI
+        - Deployment, CI or containers
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and the roadmap
+          required: true
+        - label: This can run without a paid API or a new external service
+          required: false

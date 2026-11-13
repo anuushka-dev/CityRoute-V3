@@ -1,0 +1,60 @@
+# Render Blueprint for CityRoute.
+#
+# One service serves both the API and the built .jsx frontend on the same
+# origin: the SPA is served at /, the JSON service index at /api.
+#
+# Deploy with: Render Dashboard -> New -> Blueprint -> point at this repository.
+
+services:
+  - type: web
+    name: cityroute-demo
+    runtime: docker
+    plan: free
+    region: singapore
+
+    dockerfilePath: ./Dockerfile.render-free
+    dockerContext: .
+
+    # Render polls this endpoint; 503 until the graph, snap index, and
+    # dispatch adjacency are loaded.
+    healthCheckPath: /health/ready
+
+    autoDeploy: true
+
+    envVars:
+      - key: CITYROUTE_ENVIRONMENT
+        value: production
+
+      - key: CITYROUTE_CITY_NAME
+        value: Kanpur Central, Uttar Pradesh, India
+
+      - key: CITYROUTE_GRAPH_FILE
+        value: kanpur_central.graphml
+
+      - key: CITYROUTE_LOG_LEVEL
+        value: INFO
+
+      # Serve the built single-page app at /.
+      - key: CITYROUTE_SERVE_FRONTEND
+        value: "true"
+
+      # The free plan has no Redis instance. Cache operations stay fail-open,
+      # so route, matrix, VRP, and dispatch requests keep working without it.
+      - key: CITYROUTE_REDIS_FAIL_OPEN
+        value: "true"
+      - key: CITYROUTE_READINESS_REQUIRE_REDIS
+        value: "false"
+
+      # Each worker loads its own copy of the graph in 512 MB.
+      - key: WEB_CONCURRENCY
+        value: "1"
+
+# The free plan does not include a Redis instance. On a paid plan, add:
+#
+#   - type: redis
+#     name: cityroute-cache
+#     plan: starter
+#     ipAllowList: []
+#
+# ...and set CITYROUTE_REDIS_URL on the web service to the key value's
+# internal connection string.
