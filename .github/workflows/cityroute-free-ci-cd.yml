@@ -1,0 +1,375 @@
+name: CityRoute Free Demo CI/CD
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "app/**"
+      - "tests/**"
+      - "frontend/**"
+      - "requirements.txt"
+      - "requirements-prod.txt"
+      - "Dockerfile"
+      - "Dockerfile.render-free"
+      - "docker-compose.yml"
+      - ".dockerignore"
+      - "data/graphs/kanpur_central.graphml"
+      - ".github/workflows/cityroute-free-ci-cd.yml"
+
+  push:
+    branches:
+      - main
+    paths:
+      - "app/**"
+      - "tests/**"
+      - "frontend/**"
+      - "requirements.txt"
+      - "requirements-prod.txt"
+      - "Dockerfile"
+      - "Dockerfile.render-free"
+      - "docker-compose.yml"
+      - ".dockerignore"
+      - "data/graphs/kanpur_central.graphml"
+      - ".github/workflows/cityroute-free-ci-cd.yml"
+
+  workflow_dispatch:
+
+concurrency:
+  group: cityroute-free-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend | Python 3.11 | Ruff | Pytest | Redis
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      CITYROUTE_ENVIRONMENT: ci
+      CITYROUTE_CITY_NAME: Kanpur, Uttar Pradesh, India
+      CITYROUTE_GRAPH_FILE: kanpur_central.graphml
+      CITYROUTE_REDIS_URL: redis://127.0.0.1:6379/0
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 2
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install ruff==0.16.0
+
+      - name: Validate dependency graph
+        run: python -m pip check
+
+      - name: Lint backend and tests with Ruff
+        run: python -m ruff check app tests
+
+      - name: Check formatting of changed Python files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t python_files < <(
+            git diff --name-only HEAD^ HEAD -- '*.py'
+          )
+
+          if [ "${#python_files[@]}" -eq 0 ]; then
+            echo "No changed Python files in this commit."
+            exit 0
+          fi
+
+          echo "Checking Ruff formatting for changed Python files:"
+          printf '  %s\n' "${python_files[@]}"
+
+          python -m ruff format --check "${python_files[@]}"
+
+      - name: Compile Python sources
+        run: python -m compileall -q app tests
+
+      - name: Run full backend test suite
+        run: python -m pytest -q
+
+  frontend:
+    name: Frontend | Node 22 | .jsx build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Build frontend bundle
+        working-directory: frontend
+        run: npm run build
+
+      - name: Verify build output
+        working-directory: frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f dist/index.html
+          grep -q '<div id="root">' dist/index.html
+
+          asset_count="$(find dist/assets -type f | wc -l)"
+          echo "Bundled assets: ${asset_count}"
+
+          if [ "${asset_count}" -lt 1 ]; then
+            echo "Frontend bundle is missing its assets."
+            exit 1
+          fi
+
+      - name: Upload frontend bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: cityroute-frontend-dist
+          path: frontend/dist
+          retention-days: 7
+
+  docker-free:
+    name: Docker | Render Free image + 512 MB smoke test
+    runs-on: ubuntu-latest
+    needs:
+      - backend
+      - frontend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build Render Free image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ./Dockerfile.render-free
+          push: false
+          load: true
+          tags: cityroute-api:render-free-ci
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=CityRoute Render Free Demo
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify bundled graph
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          graph_size="$(
+            docker run --rm \
+              --entrypoint sh \
+              cityroute-api:render-free-ci \
+              -c 'stat -c %s /app/data/graphs/kanpur_central.graphml'
+          )"
+
+          echo "Bundled graph size: ${graph_size} bytes"
+
+          if [ "${graph_size}" -le 10000000 ]; then
+            echo "Bundled graph is missing or unexpectedly small."
+            exit 1
+          fi
+
+      - name: Start 512 MB smoke-test container
+        run: |
+          docker run -d \
+            --name cityroute-render-free-smoke \
+            --memory=512m \
+            -p 8003:8000 \
+            -e CITYROUTE_ENVIRONMENT=production \
+            -e CITYROUTE_CITY_NAME="Kanpur, Uttar Pradesh, India" \
+            -e CITYROUTE_GRAPH_FILE=kanpur_central.graphml \
+            -e WEB_CONCURRENCY=1 \
+            cityroute-api:render-free-ci
+
+      - name: Wait for CityRoute readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..60}; do
+            response="$(
+              curl \
+                --silent \
+                --show-error \
+                --fail \
+                http://127.0.0.1:8003/health/ready \
+                || true
+            )"
+
+            echo "Attempt ${attempt}: ${response}"
+
+            if echo "${response}" | grep -q '"ready":true'; then
+              echo "CityRoute readiness check passed."
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo "CityRoute did not become ready within the smoke-test window."
+          echo
+          echo "Container logs:"
+          docker logs cityroute-render-free-smoke
+          exit 1
+
+      - name: Verify health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl \
+            --silent \
+            --show-error \
+            --fail \
+            http://127.0.0.1:8003/health
+
+          echo
+          echo "Health endpoint passed."
+
+      - name: Verify readiness endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          curl \
+            --silent \
+            --show-error \
+            --fail \
+            http://127.0.0.1:8003/health/ready
+
+          echo
+          echo "Readiness endpoint passed."
+
+      - name: Verify bundled frontend is served at the service root
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          index_html="$(curl --silent --show-error --fail http://127.0.0.1:8003/)"
+
+          if ! echo "${index_html}" | grep -q '<div id="root">'; then
+            echo "The built SPA is not being served at /."
+            exit 1
+          fi
+
+          echo "SPA shell served at /."
+
+      - name: Verify the JSON service index moved to /api
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          index="$(curl --silent --show-error --fail http://127.0.0.1:8003/api)"
+
+          echo "${index}"
+
+          if ! echo "${index}" | grep -q '"service":"cityroute"'; then
+            echo "The JSON service index is not available at /api."
+            exit 1
+          fi
+
+          echo "JSON service index served at /api."
+
+      - name: Verify a client-side route falls back to the SPA
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          deep_link="$(curl --silent --show-error --fail http://127.0.0.1:8003/operations/dispatch)"
+
+          if ! echo "${deep_link}" | grep -q '<div id="root">'; then
+            echo "Client-side route fallback is broken."
+            exit 1
+          fi
+
+          echo "Client-side route fallback passed."
+
+      - name: Check memory usage
+        run: docker stats --no-stream cityroute-render-free-smoke
+
+      - name: Show container logs on failure
+        if: failure()
+        run: |
+          if docker container inspect cityroute-render-free-smoke >/dev/null 2>&1; then
+            docker logs cityroute-render-free-smoke
+          else
+            echo "Smoke-test container was never created."
+          fi
+
+      - name: Stop smoke-test container
+        if: always()
+        run: docker rm -f cityroute-render-free-smoke || true
+
+  deploy-render:
+    name: Deploy | Render Free Demo
+    runs-on: ubuntu-latest
+    needs:
+      - docker-free
+
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/cityroute-demo'
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Trigger Render deployment
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -n "${RENDER_DEPLOY_HOOK_URL}"
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --request POST \
+            "${RENDER_DEPLOY_HOOK_URL}"
+
+      - name: Deployment triggered
+        run: echo "Render Free deployment triggered successfully."

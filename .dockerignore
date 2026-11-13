@@ -1,0 +1,61 @@
+# CityRoute Docker build context
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Node dependencies and local build output are rebuilt inside the image
+frontend/node_modules/
+frontend/dist/
+node_modules/
+dist/
+
+# Environment/secrets
+.env
+.env.*
+!.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Tests are not needed in the runtime image
+tests/
+
+# Local benchmark/output artifacts
+benchmarks/
+cache/
+
+# Keep only the graph used by the CityRoute deployment images.
+# The larger 63 MB data/graphs/kanpur.graphml extract is not shipped and is
+# mounted (or downloaded by app.services.graph_service) when needed.
+data/*
+!data/graphs/
+data/graphs/*
+!data/graphs/kanpur_central.graphml
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Docker / local runtime files
+docker-compose.yml
+docker-compose.*.yml
+*.log
+*.zip

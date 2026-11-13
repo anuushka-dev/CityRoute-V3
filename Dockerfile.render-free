@@ -1,0 +1,62 @@
+# CityRoute free-tier image (Render Free, 512 MB).
+#
+# Same two-stage build as Dockerfile, but pinned to the smaller Kanpur Central
+# graph and a single Uvicorn worker so the runtime stays inside 512 MB.
+
+# ---------------------------------------------------------------------------
+# Stage 1 - build the frontend bundle
+# ---------------------------------------------------------------------------
+FROM node:22-alpine AS frontend-build
+
+WORKDIR /frontend
+
+ARG VITE_API_PREFIX=""
+ENV VITE_API_PREFIX=${VITE_API_PREFIX}
+
+COPY frontend/package.json frontend/package-lock.json ./
+
+RUN npm ci --no-audit --no-fund
+
+COPY frontend/ ./
+
+RUN npm run build
+
+# ---------------------------------------------------------------------------
+# Stage 2 - API runtime that also serves the built SPA
+# ---------------------------------------------------------------------------
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+
+# Small graph, loaded by a single worker.
+ENV CITYROUTE_GRAPH_FILE=kanpur_central.graphml
+
+WORKDIR /app
+
+COPY requirements-prod.txt .
+
+RUN python -m pip install --upgrade pip \
+    && pip install --no-cache-dir -r requirements-prod.txt
+
+COPY app ./app
+
+# Small graph for the Render Free instance
+COPY data/graphs/kanpur_central.graphml ./data/graphs/kanpur_central.graphml
+
+COPY --from=frontend-build /frontend/dist ./frontend/dist
+
+RUN useradd --create-home --uid 10001 appuser \
+    && chown -R appuser:appuser /app
+
+USER appuser
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD python -c "import os,urllib.request,sys; \
+url='http://127.0.0.1:%s/health' % os.environ.get('PORT','8000'); \
+sys.exit(0 if urllib.request.urlopen(url, timeout=4).status == 200 else 1)" || exit 1
+
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1}"]

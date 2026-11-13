@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/anuushka-dev/CityRoute-V3/security/advisories/new
+    about: Report a vulnerability privately instead of opening an issue.
+  - name: Deployment and troubleshooting guide
+    url: https://github.com/anuushka-dev/CityRoute-V3/blob/main/DEPLOYMENT.md
+    about: Docker, Compose, Render, environment variables and common failures.
