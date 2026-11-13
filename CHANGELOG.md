@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.1] - 2026-11-14
+
+### Security
+
+- `pytest` 8.3.4 → **9.0.3** for the temporary-directory handling advisory.
+- `vite` 8.2.2 → **8.3.7**, with `source-map-js` forced to **1.2.2** through an npm override. This clears the vite, launch-editor and source-map-js advisories; `postcss` and `rolldown` moved with them.
+- The lockfile was regenerated with `npm install --package-lock-only` and verified with `npm ci` plus a full bundle build before it was committed.
+- Open Dependabot alerts on the default branch: **8 → 0** (2 high, 5 moderate, 1 low).
+
 ## [3.0.0] - 2026-11-14
 
 First release of CityRoute as a standalone repository: one FastAPI process serving the API and the React SPA, with the road graph, the benchmarks and the deployments included.
